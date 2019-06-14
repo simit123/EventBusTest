@@ -8,9 +8,6 @@ import org.greenrobot.eventbus.EventBus;
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class MainActivity extends AppCompatActivity {
 
     private TextView tv;
@@ -19,23 +16,29 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        EventBus.getDefault().register(this);
+
         tv = ((TextView) findViewById(R.id.tv));
-        MessageEvent messageEvent = new MessageEvent("eventBus");
-        EventBus.getDefault().post("eventBus");
-    }
 
+    }
     @Subscribe(threadMode = ThreadMode.MAIN)
-    public void getMessage(String messageEvent){
-            tv.setText(messageEvent);
+    public void getMessage( MessageEvent messageEvent){
+            tv.setText(messageEvent.getMessage());
     }
-
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
+    protected void onStart() {
+        super.onStart();
+        EventBus.getDefault().register(this);
+        MessageEvent messageEvent = new MessageEvent("eventBus");
+        EventBus.getDefault().post(messageEvent);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
         EventBus.getDefault().unregister(this);
     }
+
     /**
      *  EVENTBUS 源码分析：
      *  1.注册
@@ -62,23 +65,37 @@ public class MainActivity extends AppCompatActivity {
         }
 
              EventBus(EventBusBuilder builder) {
-             logger = builder.getLogger();
-             subscriptionsByEventType = new HashMap<>();
-             typesBySubscriber = new HashMap<>();
-             stickyEvents = new ConcurrentHashMap<>();
+             logger = builder.getLogger();//eventBus日志
+            //这三个核心成员变量
+             subscriptionsByEventType = new HashMap<>();//Map<Class<?>, CopyOnWriteArrayList<Subscription>> subscriptionsByEventType  CopyOnWriteArrayList线程安全的list集合 用来存储订阅方法的class 和 订阅者和订阅方法的关系
+             typesBySubscriber = new HashMap<>();//Map<Object, List<Class<?>>> typesBySubscriber 维护的是订阅者和订阅方法之间的对应关系
+             stickyEvents = new ConcurrentHashMap<>();//Map<Class<?>, Object> stickyEvents
+
+            //eventBus线程间的调度 搞清楚这四种分别是哪四种？
              mainThreadSupport = builder.getMainThreadSupport();
              mainThreadPoster = mainThreadSupport != null ? mainThreadSupport.createPoster(this) : null;
              backgroundPoster = new BackgroundPoster(this);
              asyncPoster = new AsyncPoster(this);
+
+            //记录事件总数
              indexCount = builder.subscriberInfoIndexes != null ? builder.subscriberInfoIndexes.size() : 0;
+            //查找添加@subscribe注解的方法
              subscriberMethodFinder = new SubscriberMethodFinder(builder.subscriberInfoIndexes,
              builder.strictMethodVerification, builder.ignoreGeneratedIndex);
+
+            //处理事件方法异常时是否需要打印log default true
              logSubscriberExceptions = builder.logSubscriberExceptions;
+            //没有订阅者订阅此消息时是否打印log default true
              logNoSubscriberMessages = builder.logNoSubscriberMessages;
+            //处理方法有异常，是否发送这个event default true
              sendSubscriberExceptionEvent = builder.sendSubscriberExceptionEvent;
+            //没有处理方法时，是否需要发送sendNoSubscriberEvent这个标签 default true
              sendNoSubscriberEvent = builder.sendNoSubscriberEvent;
+            //是否需要发送 throwSubscriberException 标签 default true
              throwSubscriberException = builder.throwSubscriberException;
+            //与接收者有继承关系的类是否都需要发送 default true
              eventInheritance = builder.eventInheritance;
+            //线程池
              executorService = builder.executorService;
              }
      *
@@ -120,7 +137,7 @@ public class MainActivity extends AppCompatActivity {
              return subscriberMethods;
              }
             //缓存中没有则直接通过findUsingReflection() 方法 或者 findUsingInfo() 方法获取订阅方法
-             if (ignoreGeneratedIndex) {// 该参数表示是否忽略注解器生成的MyEventBusIndex，默认为false
+             if (ignoreGeneratedIndex) {// 该参数表示是否忽略注解器生成的MyEventBusIndex，默认为false  （是否强制使用反射，即使生成了索引）
              subscriberMethods = findUsingReflection(subscriberClass);
              } else {
              subscriberMethods = findUsingInfo(subscriberClass);
@@ -233,14 +250,14 @@ public class MainActivity extends AppCompatActivity {
              }
              }
 
-                subscribe() 方法（这块逻辑没看太懂）
+                subscribe() 方法
 
      *
      *      subscribe(subscriber, subscriberMethod); 具体如何注册的逻辑如下
      *
      *        private void subscribe(Object subscriber, SubscriberMethod subscriberMethod) {
                  Class<?> eventType = subscriberMethod.eventType;
-                //将观察者和订阅方法封装成一个Subscription对象
+                //将订阅者和订阅方法封装成一个Subscription对象
                  Subscription newSubscription = new Subscription(subscriber, subscriberMethod);
                 //根据事件类型从缓存中取出subscriptions（map）
                  CopyOnWriteArrayList<Subscription> subscriptions = subscriptionsByEventType.get(eventType);
@@ -263,11 +280,11 @@ public class MainActivity extends AppCompatActivity {
                  }
 
                  List<Class<?>> subscribedEvents = typesBySubscriber.get(subscriber);
-                 if (subscribedEvents == null) {
+                 if (subscribedEvents == null) {//subscribedEvents为空 然后new 一个 subscribedEvents 并且put进 typesBySubscriber 中
                  subscribedEvents = new ArrayList<>();
                  typesBySubscriber.put(subscriber, subscribedEvents);
                  }
-                 subscribedEvents.add(eventType);
+                 subscribedEvents.add(eventType);//subscribedEvents集合将订阅方法全部add进去，此时typesBySubscriber这个map中就保存了订阅者subscriber（注册时传入的this）和订阅方法（添加@Subscribe的方法）的所有class类型
 
 
                 //如果是粘性事件的话需要做如下处理  粘性事件 就是在发送事件之后再订阅该事件也能收到该事件
